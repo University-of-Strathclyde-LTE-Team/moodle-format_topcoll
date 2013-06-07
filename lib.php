@@ -822,7 +822,47 @@ class format_topcoll extends format_base {
 
         $this->update_course_format_options($data);
     }
-
+    /**
+     */
+    public function extend_course_navigation($navigation, navigation_node $node) {
+	    $navigationsections = array();
+	    if ($course = $this->get_course()) {
+	    //$navigation->load_generic_course_sections($course, $node);
+	    	//lifted from $navigation->load_generic_course_sections;
+	    	global $CFG, $DB, $USER, $SITE;
+	    	require_once($CFG->dirroot.'/course/lib.php');
+	    
+	    	list($sections, $activities) = $this->generate_sections_and_activities($course);
+	    
+	    
+	    	foreach ($sections as $sectionid => $section) {
+		    	$section = clone($section);
+		    	if ($course->id == $SITE->id) {
+		    		$navigation->load_section_activities($coursenode, $section->section, $activities);
+		    	} else {
+			    	if (!$section->uservisible || (!$this->showemptysections &&
+			    	!$section->hasactivites && $this->includesectionnum !== $section->section)) {
+			    		continue;
+			    	}
+			    
+			    	$sectionname = $this->get_section_name();
+			    	//get_section_name($course, $section);
+			    	$url = course_get_url($course, $section->section, array('navigation' => true));
+			    
+			    			$sectionnode = $coursenode->add($sectionname, $url, navigation_node::TYPE_SECTION, null, $section->id);
+			    			$sectionnode->nodetype = navigation_node::NODETYPE_BRANCH;
+			    			$sectionnode->hidden = (!$section->visible || !$section->available);
+			    					if ($navigation->includesectionnum !== false && $this->includesectionnum == $section->section) {
+			    					$navigation->load_section_activities($sectionnode, $section->section, $activities);
+			    	}
+			    	$section->sectionnode = $sectionnode;
+	    			$navigationsections[$sectionid] = $section;
+		    	}
+	    	}
+	    
+	    	}
+		return $navigationsections;
+    }
 }
 
 /**
