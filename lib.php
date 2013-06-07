@@ -63,6 +63,16 @@ class format_topcoll extends format_base {
      * @return string The section name.
      */
     public function get_section_name($section) {
+    	return $this->get_proper_section_name($section);
+    	}
+    	
+    /**
+     * Allows us to choose if we want the "- Toggle" suffix on the end
+     * @param int|stdClass $section Section object from database or just field section.section
+     * @param bool $fornavigation True to suppress the suffix
+     * @return string
+     */
+    protected function get_proper_section_name($section, $fornavigation = false) {
         $course = $this->get_course();
         $thesection = $this->get_section($section);
         if (is_null($thesection)) {
@@ -832,6 +842,125 @@ class format_topcoll extends format_base {
 
         $this->update_course_format_options($data);
     }
+    
+    /**
+     * Generates a navigation structure for the course format
+     *
+     * Primarily this removes the "- Toggle" from the options that are displayed in the navigation.
+     *
+     * @param unknown $navigation
+     * @param navigation_node $coursenode
+     * @return multitype:Ambigous <unknown, multitype:, multitype:multitype:stdClass  unknown >
+     */
+    public function extend_course_navigation($navigation, navigation_node $coursenode) {
+    	global $CFG, $DB, $USER, $SITE;
+    	$navigationsections = array();
+    
+    	if ($course = $this->get_course()) {
+    		//lifted from $navigation->load_generic_course_sections($course, $node);
+    
+    		require_once($CFG->dirroot.'/course/lib.php');
+    	  
+    		list($sections, $activities) = $this->generate_sections_and_activities($navigation,$course);
+    	  
+    		foreach ($sections as $sectionid => $section) {
+    			$section = clone($section);
+    			if ($course->id == $SITE->id) {
+    				$navigation->load_section_activities($coursenode, $section->section, $activities);
+    			} else {
+    				if (!$section->uservisible ) {/* || (!$navigation->showemptysections &&
+    					!$section->hasactivites && $navigation->includesectionnum !== $section->section)) {
+    					*/
+    					continue;
+    				}
+    				 
+    				$sectionname = $this->get_proper_section_name($section, true);
+    				//get_section_name($course, $section);
+    				$url = course_get_url($course, $section->section, array('navigation' => true));
+    				 
+    				$sectionnode = $coursenode->add($sectionname, $url, navigation_node::TYPE_SECTION, null, $section->id);
+    				$sectionnode->nodetype = navigation_node::NODETYPE_BRANCH;
+    				$sectionnode->hidden = (!$section->visible || !$section->available);
+    				if ($navigation->includesectionnum !== false && $this->includesectionnum == $section->section) {
+    					$navigation->load_section_activities($sectionnode, $section->section, $activities);
+    				}
+    				$section->sectionnode = $sectionnode;
+    				$navigationsections[$sectionid] = $section;
+    			}
+    		}
+    	  
+    	}
+    	return $navigationsections;
+    }
+    
+    /**
+     * Generates an array of sections and an array of activities for the given course.
+     *
+     * This is lifted from navigation api since we don't want to change the code but it won't
+     * let us call it as it's protected there.
+     * This method uses the cache to improve performance and avoid the get_fast_modinfo call
+     *
+     * @param stdClass $course
+     * @return array Array($sections, $activities)
+     */
+    protected function generate_sections_and_activities($navigation, stdClass $course) {
+    	global $CFG;
+    	require_once($CFG->dirroot.'/course/lib.php');
+    
+    	$modinfo = get_fast_modinfo($course);
+    	$sections = $modinfo->get_section_info_all();
+    
+    	// For course formats using 'numsections' trim the sections list
+    	$courseformatoptions = course_get_format($course)->get_format_options();
+    	if (isset($courseformatoptions['numsections'])) {
+    		$sections = array_slice($sections, 0, $courseformatoptions['numsections']+1, true);
+    	}
+    
+    	$activities = array();
+    
+    	foreach ($sections as $key => $section) {
+    		// Clone and unset summary to prevent $SESSION bloat (MDL-31802).
+    		$sections[$key] = clone($section);
+    		unset($sections[$key]->summary);
+    		$sections[$key]->hasactivites = false;
+    		if (!array_key_exists($section->section, $modinfo->sections)) {
+    			continue;
+    		}
+    		foreach ($modinfo->sections[$section->section] as $cmid) {
+    			$cm = $modinfo->cms[$cmid];
+    			if (!$cm->uservisible) {
+    				continue;
+    			}
+    			$activity = new stdClass;
+    			$activity->id = $cm->id;
+    			$activity->course = $course->id;
+    			$activity->section = $section->section;
+    			$activity->name = $cm->name;
+    			$activity->icon = $cm->icon;
+    			$activity->iconcomponent = $cm->iconcomponent;
+    			$activity->hidden = (!$cm->visible);
+    			$activity->modname = $cm->modname;
+    			$activity->nodetype = navigation_node::NODETYPE_LEAF;
+    			$activity->onclick = $cm->get_on_click();
+    			$url = $cm->get_url();
+    			if (!$url) {
+    				$activity->url = null;
+    				$activity->display = false;
+    			} else {
+    				$activity->url = $cm->get_url()->out();
+    				$activity->display = true;
+    				if ($navigation->module_extends_navigation($cm->modname)) {
+    					$activity->nodetype = navigation_node::NODETYPE_BRANCH;
+    				}
+    			}
+    			$activities[$cmid] = $activity;
+    			if ($activity->display) {
+    				$sections[$key]->hasactivites = true;
+    			}
+    		}
+    	}
+    
+    	return array($sections, $activities);
 }
 
 /**
